@@ -1,0 +1,4 @@
+The requirements for this project are:
+  - scikit-learn
+  - numpy
+  - pandas

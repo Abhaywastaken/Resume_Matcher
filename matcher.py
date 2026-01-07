@@ -1,65 +1,63 @@
 #FILE: matcher.py
 
 from typing import List
-import math
-import re
+import os
 
 try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import linear_kernel
-    SKLEARN_AVAILABLE = True
+    from sentence_transformers import SentenceTransformer, util
+    MODEL_AVAILABLE = True
 except Exception:
-    SKLEARN_AVAILABLE = False
+    MODEL_AVAILABLE = False
 
+import math
+import re
 
 def simple_tokenize(text: str):
     text = text.lower()
     return re.findall(r"\b[a-z]{2,}\b", text)
 
-
 class ResumeMatcher:
-    def __init__(self):
-        self.vectorizer = None
-        self.tfidf_matrix = None
-        self.documents = None
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        self.model_name = model_name
+        self.model = None
+        if MODEL_AVAILABLE:
+            try:
+                self.model = SentenceTransformer(self.model_name)
+            except Exception:
+                self.model = None
 
-    def fit_transform(self, documents: List[str]):
-        self.documents = documents
-        if SKLEARN_AVAILABLE:
-            self.vectorizer = TfidfVectorizer(stop_words="english")
-            self.tfidf_matrix = self.vectorizer.fit_transform(documents)
-            return self.tfidf_matrix
+    def embed(self, texts: List[str]):
+        if self.model is not None:
+            return self.model.encode(texts, convert_to_tensor=True)
+        token_lists = [simple_tokenize(t) for t in texts]
         vocab = {}
-        tokenized = [simple_tokenize(d) for d in documents]
-        for tokens in tokenized:
+        for tokens in token_lists:
             for t in tokens:
                 if t not in vocab:
                     vocab[t] = len(vocab)
-        tf = []
-        for tokens in tokenized:
-            vec = [0] * len(vocab)
+        vecs = []
+        for tokens in token_lists:
+            v = [0] * len(vocab)
             for t in tokens:
-                vec[vocab[t]] += 1
-            tf.append(vec)
-        N = len(tf)
-        df = [0] * len(vocab)
-        for vec in tf:
-            for i, v in enumerate(vec):
-                if v > 0:
-                    df[i] += 1
-        idf = [math.log((N + 1) / (d + 1)) + 1 for d in df]
-        tfidf = [[v * i for v, i in zip(vec, idf)] for vec in tf]
-        self.vectorizer = vocab
-        return tfidf
+                v[vocab[t]] += 1
+            vecs.append(v)
+        return vecs
 
-    def similarity(self, a, b):
-        if SKLEARN_AVAILABLE:
-            return linear_kernel(a, b)
-        def cosine(x, y):
-            dot = sum(i * j for i, j in zip(x, y))
-            nx = math.sqrt(sum(i * i for i in x))
-            ny = math.sqrt(sum(j * j for j in y))
-            return 0.0 if nx == 0 or ny == 0 else dot / (nx * ny)
-        return [[cosine(x, y) for y in b] for x in a]
+    def score_job_vs_resumes(self, job: str, resumes: List[str]) -> List[float]:
+        docs = [job] + resumes
+        embs = self.embed(docs)
+        if MODEL_AVAILABLE and self.model is not None:
+            job_emb = embs[0:1]
+            resume_embs = embs[1:]
+            sims = util.cos_sim(job_emb, resume_embs)[0]  # tensor
+            return [float(x) for x in sims]
+        def cosine(u, v):
+            dot = sum(a*b for a,b in zip(u,v))
+            nu = math.sqrt(sum(a*a for a in u))
+            nv = math.sqrt(sum(b*b for b in v))
+            return 0.0 if nu==0 or nv==0 else dot/(nu*nv)
+        job_vec = embs[0]
+        resume_vecs = embs[1:]
+        return [cosine(job_vec, rv) for rv in resume_vecs]
 
 

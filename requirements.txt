@@ -1,4 +1,6 @@
 The requirements for this project are:
+  - sentence-transformers
+  - openai
   - scikit-learn
   - numpy
   - pandas
